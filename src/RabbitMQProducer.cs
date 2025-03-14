@@ -12,7 +12,7 @@ namespace MetaFrm.Service
         private string QueueName { get; set; }
 
         private IConnection? _connection;
-        private IModel? _model;
+        private IChannel? _channel;
 
         /// <summary>
         /// RabbitMQProducer
@@ -21,33 +21,33 @@ namespace MetaFrm.Service
         {
             this.ConnectionString = connectionString;
             this.QueueName = queueName;
-
-            this.Init();
+           
+            Task.Run(() => this.Init());
         }
 
-        private void Init()
+        private async Task Init()
         {
             this.Close();
 
-            this._connection = new ConnectionFactory
+            this._connection = await new ConnectionFactory
             {
                 Uri = new(this.ConnectionString)
-            }.CreateConnection();
+            }.CreateConnectionAsync();
 
-            this._model = _connection.CreateModel();
-            this._model.QueueDeclare(queue: this.QueueName, durable: false, exclusive: false, autoDelete: false, arguments: null);
+            this._channel = await _connection.CreateChannelAsync();
+            await this._channel.QueueDeclareAsync(queue: this.QueueName, durable: false, exclusive: false, autoDelete: false, arguments: null);
         }
         private void Close()
         {
-            if (_model != null && _model.IsOpen)
+            if (this._channel != null && this._channel.IsOpen)
             {
-                _model.Close();
-                _model = null;
+                this._channel.CloseAsync();
+                this._channel = null;
             }
-            if (_connection != null && _connection.IsOpen)
+            if (this._connection != null && this._connection.IsOpen)
             {
-                _connection.Close();
-                _connection = null;
+                this._connection.CloseAsync();
+                this._connection = null;
             }
         }
 
@@ -72,12 +72,16 @@ namespace MetaFrm.Service
         //https://dotnetblog.asphostportal.com/how-to-make-sure-your-asp-net-core-keep-running-on-iis/
         string IServiceString.Request(string data)
         {
-            if (_model == null)
-                return "";
-
-            _model.BasicPublish(string.Empty, this.QueueName, null, Encoding.UTF8.GetBytes(data));
-
+            Task.Run(() => this.BasicPublishAsync(data));
+           
             return "";
+        }
+        private async void BasicPublishAsync(string data)
+        {
+            if (this._channel == null)
+                return;
+
+            await this._channel.BasicPublishAsync(exchange: string.Empty, routingKey: this.QueueName, body: Encoding.UTF8.GetBytes(data));
         }
     }
 }
