@@ -1,4 +1,5 @@
-﻿using RabbitMQ.Client;
+﻿using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
 using System.Text;
 
 namespace MetaFrm.Service
@@ -14,6 +15,9 @@ namespace MetaFrm.Service
         private IConnection? _connection;
         private IChannel? _channel;
 
+        private readonly SemaphoreSlim _initLock = new(1, 1);
+        private bool _initialized;
+
         /// <summary>
         /// RabbitMQProducer
         /// </summary>
@@ -21,21 +25,39 @@ namespace MetaFrm.Service
         {
             this.ConnectionString = connectionString;
             this.QueueName = queueName;
-           
+
             Task.Run(() => this.Init());
         }
 
         private async Task Init()
         {
-            this.Close();
 
-            this._connection = await new ConnectionFactory
+            if (this._initialized) return;
+
+            await this._initLock.WaitAsync();
+
+            try
             {
-                Uri = new(this.ConnectionString)
-            }.CreateConnectionAsync();
+                if (this._initialized) return;
 
-            this._channel = await _connection.CreateChannelAsync();
-            await this._channel.QueueDeclareAsync(queue: this.QueueName, durable: false, exclusive: false, autoDelete: false, arguments: null);
+                this.Close();
+
+                this._connection = await new ConnectionFactory
+                {
+                    Uri = new(this.ConnectionString),
+                    AutomaticRecoveryEnabled = true,
+                    NetworkRecoveryInterval = TimeSpan.FromSeconds(10)
+                }.CreateConnectionAsync();
+
+                this._channel = await _connection.CreateChannelAsync();
+                await this._channel.QueueDeclareAsync(queue: this.QueueName, durable: true, exclusive: false, autoDelete: false, arguments: null);
+
+                this._initialized = true;
+            }
+            finally
+            {
+                this._initLock.Release();
+            }
         }
         private void Close()
         {
@@ -72,16 +94,39 @@ namespace MetaFrm.Service
         //https://dotnetblog.asphostportal.com/how-to-make-sure-your-asp-net-core-keep-running-on-iis/
         string IServiceString.Request(string data)
         {
-            Task.Run(() => this.BasicPublishAsync(data));
-           
-            return "";
+            _ = this.BasicPublishAsync(data);
+            return string.Empty;
         }
-        private async void BasicPublishAsync(string data)
+        private async Task BasicPublishAsync(string data, int runCount = 1)
         {
-            if (this._channel == null)
+            if (!this._initialized)
+            {
+                if (Factory.Logger.IsEnabled(LogLevel.Error))
+                    Factory.Logger.LogError("Producer is not started. {runCount}", runCount);
+
+                if (runCount <= 2)
+                {
+                    await Task.Delay(300);
+
+                    //초기화 다시 시도
+                    await this.Init();
+
+                    await this.BasicPublishAsync(data, runCount + 1);
+                    return;
+                }
+                else
+                    throw new InvalidOperationException("Producer is not started.");
+            }
+
+            if (this._channel == null || !this._channel.IsOpen)
                 return;
 
-            await this._channel.BasicPublishAsync(exchange: string.Empty, routingKey: this.QueueName, body: Encoding.UTF8.GetBytes(data));
+            var properties = new BasicProperties
+            {
+                Persistent = true// DeliveryMode = 2
+            };
+
+            await this._channel.BasicPublishAsync(exchange: string.Empty, routingKey: this.QueueName, mandatory: false, basicProperties: properties, body: Encoding.UTF8.GetBytes(data));
         }
     }
 }
