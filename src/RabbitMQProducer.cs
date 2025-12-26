@@ -50,7 +50,7 @@ namespace MetaFrm.Service
                 }.CreateConnectionAsync();
 
                 this._channel = await _connection.CreateChannelAsync();
-                await this._channel.QueueDeclareAsync(queue: this.QueueName, durable: false, exclusive: false, autoDelete: false, arguments: null);
+                await this._channel.QueueDeclareAsync(queue: this.QueueName, durable: true, exclusive: false, autoDelete: false, arguments: null);
 
                 this._initialized = true;
             }
