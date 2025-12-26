@@ -15,9 +15,6 @@ namespace MetaFrm.Service
         private IConnection? _connection;
         private IChannel? _channel;
 
-        private readonly SemaphoreSlim _initLock = new(1, 1);
-        private bool _initialized;
-
         /// <summary>
         /// RabbitMQProducer
         /// </summary>
@@ -31,15 +28,8 @@ namespace MetaFrm.Service
 
         private async Task Init()
         {
-
-            if (this._initialized) return;
-
-            await this._initLock.WaitAsync();
-
             try
             {
-                if (this._initialized) return;
-
                 this.Close();
 
                 this._connection = await new ConnectionFactory
@@ -51,12 +41,9 @@ namespace MetaFrm.Service
 
                 this._channel = await _connection.CreateChannelAsync();
                 await this._channel.QueueDeclareAsync(queue: this.QueueName, durable: true, exclusive: false, autoDelete: false, arguments: null);
-
-                this._initialized = true;
             }
             finally
             {
-                this._initLock.Release();
             }
         }
         private void Close()
@@ -99,25 +86,6 @@ namespace MetaFrm.Service
         }
         private async Task BasicPublishAsync(string data, int runCount = 1)
         {
-            if (!this._initialized)
-            {
-                if (Factory.Logger.IsEnabled(LogLevel.Error))
-                    Factory.Logger.LogError("Producer is not started. {runCount}", runCount);
-
-                if (runCount <= 2)
-                {
-                    await Task.Delay(300);
-
-                    //초기화 다시 시도
-                    await this.Init();
-
-                    await this.BasicPublishAsync(data, runCount + 1);
-                    return;
-                }
-                else
-                    throw new InvalidOperationException("Producer is not started.");
-            }
-
             if (this._channel == null || !this._channel.IsOpen)
                 return;
 
