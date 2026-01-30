@@ -128,5 +128,12 @@ namespace MetaFrm.Service
 
             await this._channel.BasicPublishAsync(exchange: string.Empty, routingKey: this.QueueName, mandatory: false, basicProperties: properties, body: Encoding.UTF8.GetBytes(data));
         }
+
+        Task<string> IServiceString.RequestAsync(string data)
+        {
+            string result = ((IServiceString)this).Request(data);
+
+            return Task.FromResult(result);
+        }
     }
 }
