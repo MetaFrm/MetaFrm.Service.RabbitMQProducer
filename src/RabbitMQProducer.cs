@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
-using RabbitMQ.Client;
+﻿using RabbitMQ.Client;
 using System.Text;
 
 namespace MetaFrm.Service
@@ -101,11 +100,10 @@ namespace MetaFrm.Service
         {
             if (!this._initialized)
             {
-                if (Factory.Logger.IsEnabled(LogLevel.Error))
-                    Factory.Logger.LogError("Producer is not started. {runCount}", runCount);
-
                 if (runCount <= 2)
                 {
+                    Factory.Logger.Error("Producer is not started. {0}", runCount);
+
                     await Task.Delay(300);
 
                     //초기화 다시 시도
